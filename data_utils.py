@@ -69,14 +69,19 @@ def load_and_preprocess_data(config):
     scaler = MinMaxScaler(feature_range=(0, 1))
     data_scaled = scaler.fit_transform(data)
     
-    # 划分训练集和测试集
-    train_size = int(len(data_scaled) * config.train_ratio)
-    data_train = data_scaled[:train_size]
-    data_test = data_scaled[train_size:]
+    # 划分训练集和测试集：最后两个完整天作为测试集
+    # 每天45个点（7:45-18:45，15分钟间隔），2天=90个点
+    points_per_day = 45
+    test_days = 2
+    test_size = points_per_day * test_days  # 90个样本点
+    
+    data_train = data_scaled[:-test_size]
+    data_test = data_scaled[-test_size:]
     
     print(f"\n[数据划分]")
-    print(f"  训练集: {len(data_train)} 样本 ({config.train_ratio*100:.0f}%)")
-    print(f"  测试集: {len(data_test)} 样本 ({(1-config.train_ratio)*100:.0f}%)")
+    print(f"  训练集: {len(data_train)} 样本")
+    print(f"  测试集: {len(data_test)} 样本 (最后{test_days}个完整天)")
+    print(f"  每天样本数: {points_per_day} (07:45-18:45, 15分钟间隔)")
     
     return data_train, data_test, scaler, feature_columns + [target_column], data_dim
 
