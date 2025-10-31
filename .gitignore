@@ -23,10 +23,10 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyTorch
-*.pt
-*.pth
-*.ckpt
+# PyTorch模型文件（保留目录结构，但忽略大文件）
+checkpoint/*.pt
+checkpoint/*.pth
+checkpoint/*.ckpt
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -41,14 +41,6 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
-
-# Results (可选：如果不想上传结果文件)
-# results/*.csv
-# results/*.png
-
-# Checkpoint (可选：如果不想上传模型文件)
-checkpoint/*.pt
-checkpoint/*.pth
 
 # Excel temp files
 ~$*.xlsx
