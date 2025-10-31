@@ -25,15 +25,39 @@ matplotlib.rcParams['axes.unicode_minus'] = False
 # 全局参数
 window = 40
 length_size = 1
-batch_size = 32
+batch_size = 64  # GPU可以用更大的batch size
 epochs_baseline = 30  # 基准模型训练轮数
-epochs_stage1 = 5    # CAUN第一阶段
-epochs_stage2 = 5    # CAUN第二阶段
+epochs_stage1 = 30    # CAUN第一阶段
+epochs_stage2 = 30    # CAUN第二阶段
 
 n_filters = 32
 n_filters1 = 50
 filter_size = 4
 dropout_rate = 0.1
+
+# GPU优化设置
+def setup_device():
+    """设置并返回计算设备"""
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        # 启用cudnn自动优化
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.enabled = True
+        print(f"✓ 使用GPU: {torch.cuda.get_device_name(0)}")
+        print(f"  GPU内存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+    elif torch.backends.mps.is_available():
+        device = torch.device('mps')
+        print("✓ 使用Apple Silicon GPU (MPS)")
+    else:
+        device = torch.device('cpu')
+        print("⚠️  使用CPU (建议使用GPU以加速训练)")
+    return device
+
+def clear_gpu_cache():
+    """清理GPU缓存"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
 
 # ==================== 统一编码器 ====================
@@ -324,7 +348,7 @@ def load_data():
     return data_train, data_test, scaler, data_dim
 
 
-def create_dataloader(data, window, length_size, batch_size, data_dim):
+def create_dataloader(data, window, length_size, batch_size, data_dim, pin_memory=True):
     seq_len = window
     sequence_length = seq_len + length_size
     result = []
@@ -343,7 +367,15 @@ def create_dataloader(data, window, length_size, batch_size, data_dim):
     y_tensor = torch.tensor(y).to(torch.float32)
     
     ds = TensorDataset(X_tensor, y_tensor)
-    dataloader = DataLoader(ds, batch_size=batch_size, shuffle=True)
+    # pin_memory=True 可以加速GPU数据传输
+    # num_workers=2 可以并行数据加载（根据CPU核心数调整）
+    dataloader = DataLoader(
+        ds, 
+        batch_size=batch_size, 
+        shuffle=True,
+        pin_memory=pin_memory and torch.cuda.is_available(),
+        num_workers=2 if torch.cuda.is_available() else 0
+    )
     
     return dataloader, X_tensor, y_tensor
 
@@ -382,7 +414,7 @@ def calculate_metrics(y_true, lower, median, upper, target_coverage=0.8):
 # ==================== 主函数 ====================
 def main():
     print("="*80)
-    print("不确定性量化方法最终对比实验")
+    print("不确定性量化方法最终对比实验 (GPU优化版)")
     print("="*80)
     print("\n对比方法:")
     print("  1. Baseline Point Prediction (无不确定性)")
@@ -392,8 +424,9 @@ def main():
     print("  5. Adaptive CAUN (我们的创新方法) ⭐")
     print("="*80)
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"\n使用设备: {device}")
+    # 设置计算设备
+    print("\n[设备配置]")
+    device = setup_device()
     
     # 加载数据
     print("\n[数据准备]")
@@ -416,6 +449,7 @@ def main():
     print("方法1: Baseline Point Prediction")
     print("="*80)
     
+    clear_gpu_cache()  # 清理GPU缓存
     baseline_model = BaselinePointModel(data_dim, n_filters, n_filters1, filter_size).to(device)
     optimizer = optim.Adam(baseline_model.parameters(), lr=0.001)
     criterion = nn.MSELoss()
@@ -424,7 +458,7 @@ def main():
     for epoch in range(epochs_baseline):
         epoch_loss = 0
         for data, target in dataloader_train:
-            data, target = data.to(device), target.to(device).squeeze()
+            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True).squeeze()
             optimizer.zero_grad()
             pred = baseline_model(data)
             loss = criterion(pred, target)
@@ -433,7 +467,10 @@ def main():
             epoch_loss += loss.item()
         
         if (epoch + 1) % 10 == 0:
-            print(f"  Epoch {epoch+1}/{epochs_baseline}, Loss: {epoch_loss/len(dataloader_train):.6f}")
+            avg_loss = epoch_loss / len(dataloader_train)
+            print(f"  Epoch {epoch+1}/{epochs_baseline}, Loss: {avg_loss:.6f}")
+            if torch.cuda.is_available():
+                print(f"    GPU内存: {torch.cuda.memory_allocated()/1024**2:.1f}MB / {torch.cuda.max_memory_allocated()/1024**2:.1f}MB")
     
     baseline_model.eval()
     with torch.no_grad():
@@ -458,6 +495,7 @@ def main():
     print("方法2: Quantile Regression")
     print("="*80)
     
+    clear_gpu_cache()
     qr_model = QuantileRegressionModel(data_dim, n_filters, n_filters1, filter_size).to(device)
     optimizer = optim.Adam(qr_model.parameters(), lr=0.001)
     
@@ -465,7 +503,7 @@ def main():
     for epoch in range(epochs_baseline):
         epoch_loss = 0
         for data, target in dataloader_train:
-            data, target = data.to(device), target.to(device).squeeze()
+            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True).squeeze()
             optimizer.zero_grad()
             pred = qr_model(data)
             loss = quantile_loss(pred, target)
@@ -474,7 +512,10 @@ def main():
             epoch_loss += loss.item()
         
         if (epoch + 1) % 10 == 0:
-            print(f"  Epoch {epoch+1}/{epochs_baseline}, Loss: {epoch_loss/len(dataloader_train):.6f}")
+            avg_loss = epoch_loss / len(dataloader_train)
+            print(f"  Epoch {epoch+1}/{epochs_baseline}, Loss: {avg_loss:.6f}")
+            if torch.cuda.is_available():
+                print(f"    GPU内存: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
     
     qr_model.eval()
     with torch.no_grad():
@@ -504,6 +545,7 @@ def main():
     print("方法3: GP Approximation")
     print("="*80)
     
+    clear_gpu_cache()
     gp_model = GPApproximationModel(data_dim, n_filters, n_filters1, filter_size).to(device)
     optimizer = optim.Adam(gp_model.parameters(), lr=0.001)
     
@@ -511,7 +553,7 @@ def main():
     for epoch in range(epochs_baseline):
         epoch_loss = 0
         for data, target in dataloader_train:
-            data, target = data.to(device), target.to(device).squeeze()
+            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True).squeeze()
             optimizer.zero_grad()
             mean, var = gp_model(data)
             loss = gaussian_nll_loss(mean, var, target)
@@ -520,7 +562,10 @@ def main():
             epoch_loss += loss.item()
         
         if (epoch + 1) % 10 == 0:
-            print(f"  Epoch {epoch+1}/{epochs_baseline}, Loss: {epoch_loss/len(dataloader_train):.6f}")
+            avg_loss = epoch_loss / len(dataloader_train)
+            print(f"  Epoch {epoch+1}/{epochs_baseline}, Loss: {avg_loss:.6f}")
+            if torch.cuda.is_available():
+                print(f"    GPU内存: {torch.cuda.memory_allocated()/1024**2:.1f}MB")
     
     gp_lower, gp_median, gp_upper = gp_model.predict_with_uncertainty(X_test.to(device))
     
@@ -588,7 +633,8 @@ def main():
     high_unc_mask, unc_scores = detector.detect(y_test_original, baseline_pred_original)
     
     # 阶段2: 训练Adaptive CAUN
-    print("\n[阶段2: 训练Adaptive CAUN]")
+    print("\n[阶段2: 训练Adaptive CAUN (使用GPU加速)]")
+    clear_gpu_cache()
     adaptive_caun = AdaptiveCAUN(
         base_encoder=baseline_model,
         decoder_dim=100,
@@ -602,11 +648,12 @@ def main():
     unc_scores_normalized = (unc_scores - unc_scores.min()) / (unc_scores.max() - unc_scores.min() + 1e-8)
     
     adaptive_caun.train()
+    print(f"  开始训练 (epochs={epochs_stage2})...")
     for epoch in range(epochs_stage2):
         epoch_loss = 0
         
         for data, target in dataloader_train:
-            data, target = data.to(device), target.to(device).squeeze()
+            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True).squeeze()
             
             # 简化：使用随机不确定性分数进行训练
             batch_unc_scores = np.random.uniform(0, 1, len(target))
@@ -620,7 +667,10 @@ def main():
             epoch_loss += loss.item()
         
         if (epoch + 1) % 10 == 0:
-            print(f"  Epoch {epoch+1}/{epochs_stage2}, Loss: {epoch_loss/len(dataloader_train):.6f}")
+            avg_loss = epoch_loss / len(dataloader_train)
+            print(f"  Epoch {epoch+1}/{epochs_stage2}, Loss: {avg_loss:.6f}")
+            if torch.cuda.is_available():
+                print(f"    GPU内存: {torch.cuda.memory_allocated()/1024**2:.1f}MB / {torch.cuda.max_memory_allocated()/1024**2:.1f}MB")
     
     # 保存模型
     torch.save(adaptive_caun.state_dict(), 'checkpoint/adaptive_caun_final.pt')
@@ -699,6 +749,17 @@ def main():
     print("\n" + "="*80)
     print("实验完成！")
     print("="*80)
+    
+    # 清理GPU资源
+    clear_gpu_cache()
+    
+    # GPU使用总结
+    if torch.cuda.is_available():
+        print("\n[GPU使用总结]")
+        print(f"  设备: {torch.cuda.get_device_name(0)}")
+        print(f"  峰值内存: {torch.cuda.max_memory_allocated()/1024**3:.2f} GB")
+        print(f"  当前内存: {torch.cuda.memory_allocated()/1024**3:.2f} GB")
+        torch.cuda.reset_peak_memory_stats()
     
     return all_results, metrics_df
 
