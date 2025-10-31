@@ -169,22 +169,5 @@ detector = UncertaintyDetector(threshold_percentile=80)  # 从70改为80
 - num_heads: 5 → 8
 - num_decoder_layers: 2 → 3
 
----
 
-## 📞 技术支持
-
-如有问题，请检查：
-1. 所有依赖是否安装：torch, numpy, pandas, sklearn, matplotlib
-2. TCN.py是否在同一目录
-3. power1.xlsx数据文件是否存在
-
----
-
-**实验完成日期**: 2025-10-31
-**Python版本**: 3.x
-**PyTorch版本**: 1.x+
-
----
-
-祝您论文写作顺利！🚀
 
