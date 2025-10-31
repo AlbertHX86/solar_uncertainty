@@ -1,173 +1,150 @@
-# 最终对比实验 (Final Comparison Experiment)
+# 多特征光伏发电不确定性量化
 
-## 📁 文件夹内容
+基于TCN-BiLSTM的光伏发电不确定性量化研究，对比5种方法。
 
-本文件夹包含了**不确定性量化方法的完整对比实验**，与其他实验文件分开管理。
+## 方法说明
 
-### 文件清单
+### 1. Baseline Point Prediction
+基准点预测模型，仅提供点预测，不估计不确定性。
 
-#### 1. 核心文件
-- **final_comparison.py** - 主实验脚本（5种方法对比）
-- **TCN.py** - TCN模块（依赖）
-- **power1.xlsx** - 原始数据文件
+### 2. Quantile Regression
+分位数回归模型，直接预测10%、50%、90%分位数。
 
-#### 2. 结果文件
-- **final_methods_comparison.csv** - 各方法指标对比
-- **final_methods_predictions.csv** - 各方法详细预测结果
-- **checkpoint/** - 保存的模型文件
-  - baseline_final.pt
-  - adaptive_caun_final.pt
+### 3. GP Approximation  
+高斯过程近似模型，预测均值和方差，基于高斯分布假设生成预测区间。
 
----
+### 4. NPKDE
+非参数核密度估计（传统方法），基于残差分布建模不确定性。
 
-## 🎯 对比的5种方法
+### 5. Adaptive CAUN ⭐（我们的方法）
+**自适应交叉注意力不确定性网络**
 
-| # | 方法名称 | 类型 | 说明 |
-|---|---------|------|------|
-| 1 | **Baseline Point Prediction** | 基准 | 无不确定性量化，仅点预测 |
-| 2 | **Quantile Regression** | 深度学习 | 直接预测三个分位数 |
-| 3 | **GP Approximation** | 统计+深度学习 | 高斯过程神经网络近似 |
-| 4 | **NPKDE** | 传统统计 | 非参数核密度估计 |
-| 5 | **Adaptive CAUN** ⭐ | 创新方法 | 自适应交叉注意力不确定性网络 |
+**创新点**：
+- 使用Transformer Decoder的Cross-Attention机制建模不确定性
+- 两阶段训练：先识别高不确定性区域，再针对性建模
+- 自适应调整预测区间宽度（高不确定性→宽区间，低不确定性→窄区间）
+- 自适应损失函数，结合分位数损失、区间合理性约束和宽度惩罚
 
----
+**架构**：
+```
+输入特征 → TCN-BiLSTM编码器 → Transformer Decoder (Cross-Attention) 
+        → 分位数预测头 → 不确定性权重网络 → 自适应区间调整
+```
 
-## 🚀 使用方法
+## 数据说明
 
-### 运行完整实验
+- **输入特征**（7维）：
+  - Total solar irradiance (W/m²)
+  - Direct normal irradiance (W/m²)  
+  - Global horizontal irradiance (W/m²)
+  - Air temperature (°C)
+  - Atmosphere (hpa)
+  - Relative humidity (%)
+  - Power (MW) - 目标变量
 
+- **数据规模**：32,895样本，15分钟间隔
+- **训练/测试划分**：70% / 30%
+
+## 训练流程
+
+### 安装依赖
 ```bash
-cd Final_Comparison_Experiment
-python final_comparison.py
+pip install -r requirements.txt
 ```
 
-### 训练参数设置
+### 快速测试（可选）
+```bash
+python quick_test.py  # 2 epochs，约3-5分钟
+```
 
-在 `final_comparison.py` 中可以修改：
+### 完整训练
+```bash
+python main.py
+```
 
+**训练过程**：
+1. 加载和预处理数据（power.xlsx）
+2. 训练Baseline模型（30 epochs）
+3. 训练Quantile Regression模型（30 epochs）
+4. 训练GP Approximation模型（30 epochs）
+5. 训练NPKDE（基于Baseline的残差）
+6. 两阶段训练Adaptive CAUN：
+   - 阶段1：使用Baseline结果识别高不确定性区域
+   - 阶段2：训练CAUN模型（30 epochs）
+7. 评估所有模型，计算12个指标
+8. 保存结果到`results/`目录
+
+**训练时间**：约20-30分钟（GPU）
+
+### 生成可视化
+```bash
+python visualize.py
+```
+
+生成4种图表：
+- `metrics_comparison.png` - 指标对比
+- `intervals_visualization.png` - 预测区间可视化
+- `detailed_comparison.png` - 详细对比
+- `ranking_table.png` - 排名表格
+
+## 评估指标
+
+**点预测指标**：MAE, RMSE, MAPE, R²
+
+**区间预测指标**：
+- PICP (覆盖率) - 目标80%
+- MPIW (平均区间宽度) - 越小越好
+- CWC (综合指标) - 越小越好
+- Winkler Score - 越小越好
+- Interval Score - 越小越好
+- ACE (覆盖误差) - 越小越好
+
+## 调整参数
+
+编辑 `config.py` 修改超参数：
 ```python
-epochs_baseline = 30  # 基准模型训练轮数（建议30）
-epochs_stage1 = 30    # CAUN第一阶段（建议30）
-epochs_stage2 = 30    # CAUN第二阶段（建议30）
+# 训练轮数
+epochs_baseline = 30
+epochs_quantile = 30
+epochs_caun_stage2 = 30
+
+# batch size和学习率
+batch_size = 64
+learning_rate = 0.001
+
+# CAUN特定参数
+decoder_dim = 100
+num_heads = 5
+num_decoder_layers = 2
 ```
 
-**快速测试**：将所有epochs改为5
+## 输出结果
 
----
+- `results/all_methods_metrics.csv` - 所有方法的评估指标
+- `results/all_methods_predictions.csv` - 所有方法的预测结果
+- `results/*.png` - 可视化图表
+- `checkpoint/*.pt` - 训练好的模型
 
-## 📊 实验结果（30 epochs）
+## 项目结构
 
-### 综合排名（按CWC）
-
-| 排名 | 方法 | PICP | MPIW | MAE | CWC |
-|------|------|------|------|-----|-----|
-| 🥇 1 | Quantile Regression | 85.42% | 9.80 | 2.46 | 9.80 |
-| 🥈 2 | GP Approximation | 88.62% | 10.56 | 2.73 | 10.56 |
-| 🥉 3 | **Adaptive CAUN** ⭐ | 93.61% | 11.54 | 2.54 | 11.54 |
-| 4 | NPKDE | 94.25% | 16.80 | 2.74 | 16.80 |
-
-### 关键发现
-
-1. **覆盖率（PICP）**：
-   - Quantile Regression最接近80%目标（85.42%）
-   - Adaptive CAUN和NPKDE偏高（93-94%），偏保守
-
-2. **区间宽度（MPIW）**：
-   - Quantile Regression最窄（9.80）
-   - Adaptive CAUN居中（11.54），显著优于NPKDE（16.80）
-
-3. **点预测精度（MAE）**：
-   - Quantile Regression最优（2.46）
-   - Adaptive CAUN次优（2.54）
-
-4. **综合评价（CWC）**：
-   - Quantile Regression综合表现最佳
-   - Adaptive CAUN排名第三，但具有独特优势
-
----
-
-## 💡 Adaptive CAUN的独特优势
-
-虽然Adaptive CAUN在整体CWC上排名第三，但它具有以下独特价值：
-
-### 1. 自适应性
-- **不同场景下智能调整**
-- 晴天：窄区间（精准）
-- 阴雨天：宽区间（安全）
-
-### 2. 可解释性
-- 基于Transformer注意力机制
-- 可以可视化注意力权重
-- 理解模型决策过程
-
-### 3. 端到端优化
-- 联合优化点预测和不确定性量化
-- 不依赖固定的点预测（如NPKDE）
-
-### 4. 实际应用价值
-从代表性天气对比（来自之前实验）：
-
-**晴天 (2020-12-30)**:
-- NPKDE: PICP=95.6%, MPIW=20.06
-- **CAUN: PICP=88.9%, MPIW=15.34** ✅ 区间减少23.5%
-
-**阴天 (2020-12-25)**:
-- NPKDE: PICP=100%, MPIW=17.32
-- **CAUN: PICP=97.8%, MPIW=5.96** ✅ 区间减少65.6%！
-
----
-
-## 📝 论文写作建议
-
-### 结果展示策略
-
-**策略1：诚实展示 + 强调优势**
 ```
-"Among baseline methods, Quantile Regression achieves the best overall 
-performance (CWC=9.80). However, our Adaptive CAUN demonstrates superior 
-adaptability: on cloudy days with high uncertainty, CAUN reduces interval 
-width by 65.6% compared to NPKDE while maintaining excellent coverage (97.8%)."
+1031/
+├── main.py                    # 主训练脚本
+├── config.py                  # 配置文件
+├── data_utils.py              # 数据处理工具
+├── metrics.py                 # 评估指标
+├── visualize.py               # 可视化工具
+├── models/                    # 模型模块
+│   ├── baseline_model.py
+│   ├── quantile_regression.py
+│   ├── gp_approximation.py
+│   ├── npkde.py
+│   └── adaptive_caun.py       # 我们的方法
+├── power.xlsx                 # 数据文件
+├── checkpoint/                # 模型保存目录
+└── results/                   # 结果输出目录
 ```
 
-**策略2：分场景对比**
-```
-表1：整体性能对比
-表2：晴天vs阴天的自适应性对比
-表3：可解释性和计算复杂度对比
-```
+## GPU支持
 
-### 讨论要点
-
-1. **权衡关系**：Quantile Regression更简洁高效，Adaptive CAUN更智能自适应
-2. **应用场景**：实时系统→QR，复杂场景→CAUN
-3. **未来工作**：结合两者优势，降低CAUN的覆盖率偏高问题
-
----
-
-## 🔧 进一步改进方向
-
-如果您希望改进Adaptive CAUN的表现：
-
-### 1. 调整训练策略
-```python
-# 增加对低覆盖率的惩罚
-# 在adaptive_loss中添加coverage loss
-```
-
-### 2. 增加训练轮数
-```python
-epochs_stage2 = 50  # 更充分训练
-```
-
-### 3. 调整不确定性阈值
-```python
-detector = UncertaintyDetector(threshold_percentile=80)  # 从70改为80
-```
-
-### 4. 优化超参数
-- decoder_dim: 100 → 128
-- num_heads: 5 → 8
-- num_decoder_layers: 2 → 3
-
-
-
+代码自动检测并使用GPU（CUDA/MPS），如无GPU则使用CPU。
