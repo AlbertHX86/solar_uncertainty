@@ -28,11 +28,12 @@ def load_and_preprocess_data(config):
     df = pd.read_excel(config.data_path)
     
     # 特征列（排除date和power）
+    # 注意：使用实际的列名，度数符号可能有编码问题
     feature_columns = [
         'Total solar irradiance (W/m2)',
         'Direct normal irradiance (W/m2)',
         'Global horizontal irradiance (W/m2)',
-        'Air temperature  (°C) ',
+        'Air temperature  (掳C) ',  # 注意这里的度数符号
         'Atmosphere (hpa)',
         'Relative humidity (%)'
     ]
