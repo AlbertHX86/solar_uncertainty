@@ -57,9 +57,14 @@ pip install -r requirements.txt
 python quick_test.py  # 2 epochs，约3-5分钟
 ```
 
-### 完整训练
+### 仅测试新方法（推荐）
 ```bash
-python main.py
+python test_caun_only.py  # 只训练和测试Adaptive CAUN，约10-15分钟
+```
+
+### 完整训练（对比5种方法）
+```bash
+python main.py  # 训练所有方法，约20-30分钟
 ```
 
 **训练过程**：
